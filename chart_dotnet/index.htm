@@ -1,0 +1,307 @@
+<!DOCTYPE HTML>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>Highcharts Example</title>
+
+		<style type="text/css">
+
+		</style>
+	</head>
+	<body>
+<script src="jquery-3.1.1.min.js"></script>
+<script src="highcharts.js"></script>
+<script src="exporting.js"></script>
+<script src="data.js"></script>
+
+<div id="heap" style="height: 400px"></div>
+<div id="pause" style="min-width: 310px; height: 400px; margin: 0 auto"></div>
+<!--
+<div id="frag" style="min-width: 310px; height: 400px; margin: 0 auto"></div>
+<div id="budget" style="min-width: 310px; height: 400px; margin: 0 auto"></div>
+-->
+
+
+		<script type="text/javascript">
+$(function () {
+
+    Highcharts.chart('heap', {
+        chart: {
+            zoomType: 'x'
+        },
+        title: {
+            text: 'Heap memory evolution'
+        },
+        subtitle: {
+            text: document.ontouchstart === undefined ?
+                    'Click and drag in the plot area to zoom in' : 'Pinch the chart to zoom in'
+        },
+        xAxis: {
+            type: 'datetime'
+        },
+        yAxis: [{
+            title: {
+                text: 'Heap occupancy'
+            },
+			labels: {
+				format: "{value} GB"
+			}
+        },{
+            title: {
+                text: 'Heap occupancy'
+            },
+			labels: {
+				format: "{value} MB"
+			}
+		}],
+        legend: {
+            enabled: true
+        },
+        plotOptions: {
+			line: {
+				lineWidth: 2,
+				tooltip: {
+					dateTimeLabelFormats: {
+						millisecond: "%H:%M:%S.%L"
+					}
+				}
+			}
+        },
+
+        series: [{
+            name: 'Heap occupancy',
+			tooltip: {
+				valueSuffix: 'GB'
+			},
+			yAxis: 0,
+            data: data_serie_heap_total
+        },
+		{
+			name: 'Gen0 occupancy',
+			yAxis: 1,
+			data: data_serie_heap_gen0
+        },
+		{
+			name: 'Gen1 occupancy',
+			yAxis: 1,
+			data: data_serie_heap_gen1
+        },
+		{
+			name: 'Gen2 occupancy',
+			yAxis: 0,
+			data: data_serie_heap_gen2
+        },
+		{
+			name: 'LOH occupancy',
+			yAxis: 0,
+			data: data_serie_heap_gen3
+		}]
+    });
+	
+    Highcharts.chart('pause', {
+        chart: {
+			type: 'scatter',
+            zoomType: 'x'
+        },
+        title: {
+            text: 'GC pause time'
+        },
+        subtitle: {
+            text: document.ontouchstart === undefined ?
+                    'Click and drag in the plot area to zoom in' : 'Pinch the chart to zoom in'
+        },
+        xAxis: {
+            type: 'datetime'
+        },
+        yAxis: [{
+            title: {
+                text: 'GC pause'
+            },
+			labels: {
+				format: "{value} ms"
+			}
+        }/*, {
+            title: {
+                text: 'Full GC pause'
+            },
+			labels: {
+				format: "{value} s"
+			}
+		}*/],
+        legend: {
+            enabled: true
+        },
+        plotOptions: {
+			scatter: {
+				tooltip: {
+					pointFormat: '{point.x:%H:%M:%S.%L} <br> pause: <b>{point.y}</b>'
+				}
+			}
+        },
+
+        series:  [{
+            name: 'pause gen0',
+			tooltip: {
+				valueSuffix: 'ms'
+			},
+            data: data_serie_pause_gen0
+        },
+		{
+            name: 'pause gen1',
+			tooltip: {
+				valueSuffix: 'ms'
+			},
+            data: data_serie_pause_gen1
+		},
+		{
+            name: 'pause initialmark',
+			tooltip: {
+				valueSuffix: 'ms'
+			},
+            data: data_serie_pause_initialmark
+		},
+		{
+            name: 'pause finalmark',
+			tooltip: {
+				valueSuffix: 'ms'
+			},
+            data: data_serie_pause_finalmark
+		}]
+    });
+/*
+    Highcharts.chart('frag', {
+        chart: {
+            zoomType: 'x'
+        },
+        title: {
+            text: 'Fragmentation'
+        },
+        subtitle: {
+            text: document.ontouchstart === undefined ?
+                    'Click and drag in the plot area to zoom in' : 'Pinch the chart to zoom in'
+        },
+        xAxis: {
+            type: 'datetime'
+        },
+        yAxis: [{
+            title: {
+                text: 'Fragmentation'
+            },
+			labels: {
+				format: "{value} MB"
+			}
+        }],
+        legend: {
+            enabled: true
+        },
+        plotOptions: {
+			line: {
+				lineWidth: 2,
+				tooltip: {
+					dateTimeLabelFormats: {
+						millisecond: "%H:%M:%S.%L"
+					}
+				}
+			}
+        },
+
+        series: [{
+            name: 'Frag gen0',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+            data: data_serie_frag0
+        },
+		{
+			name: 'Frag gen1',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_frag1
+		},
+		{
+			name: 'Frag gen2',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_frag2
+		},
+		{
+			name: 'Frag LOH',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_frag3
+		}]    
+	});
+
+    Highcharts.chart('budget', {
+        chart: {
+            zoomType: 'x'
+        },
+        title: {
+            text: 'Budget'
+        },
+        subtitle: {
+            text: document.ontouchstart === undefined ?
+                    'Click and drag in the plot area to zoom in' : 'Pinch the chart to zoom in'
+        },
+        xAxis: {
+            type: 'datetime'
+        },
+        yAxis: [{
+            title: {
+                text: 'Budget'
+            },
+			labels: {
+				format: "{value} MB"
+			}
+        }],
+        legend: {
+            enabled: true
+        },
+        plotOptions: {
+			line: {
+				lineWidth: 2,
+				tooltip: {
+					dateTimeLabelFormats: {
+						millisecond: "%H:%M:%S.%L"
+					}
+				}
+			}
+        },
+
+        series: [{
+            name: 'Budget gen0',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+            data: data_serie_budget0
+        },
+		{
+			name: 'Budget gen1',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_budget1
+		},
+		{
+			name: 'Budget gen2',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_budget2
+		},
+		{
+			name: 'Budget LOH',
+			tooltip: {
+				valueSuffix: 'MB'
+			},
+			data: data_serie_budget3
+		}]    
+	});
+	*/
+});
+</script>
+	</body>
+</html>
