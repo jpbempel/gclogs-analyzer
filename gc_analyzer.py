@@ -13,17 +13,17 @@ def open_file(inputfile, mode):
     else:
         return open(inputfile, mode)
 
+# GC type
+PARALLEL_GC = 0
+CMS_GC = 1
+G1_GC = 2
+SHENANDOAH_GC = 3
+
+# Log format
+JDK8_FORMAT = 0
+JDK9_FORMAT = 1
+
 def parse(gclog_file, data_filename):
-
-    # GC type
-    PARALLEL_GC = 0
-    CMS_GC = 1
-    G1_GC = 2
-    SHENANDOAH_GC = 3
-
-    # Log format
-    JDK8_FORMAT = 0
-    JDK9_FORMAT = 1
 
     def detect_gc_type(line):
         idx = line.find('[PSYoungGen')
@@ -66,7 +66,7 @@ def parse(gclog_file, data_filename):
             return ShenandoahGCLineParser(log_format)
         return None
 
-    timestamp_line_start_re = re.compile('\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}')
+    timestamp_line_start_re = re.compile('(\d{4}|\[\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}')
     full_line = ''
     gc_type = None
     log_format = None
@@ -126,6 +126,7 @@ class GCLineParser:
     def __init__(self, log_format):
         self.log_format = log_format
         self.pause_pattern = ', (?P<PAUSE>\d+\.\d+) secs\]'
+        self.jdk9_pause_pattern = '(?P<PAUSE>\d+\.\d+)ms'
         self.times_pattern = '\[Times: user=(?P<USER>\d+\.\d+) sys=(?P<SYS>\d+\.\d+), real=(?P<REAL>\d+\.\d+) secs\]'
         self.timestamp_re = re.compile('(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})')
         self.data = {}
@@ -245,14 +246,26 @@ class G1GCLineParser(GCLineParser):
 
     def __init__(self, log_format):
         super(G1GCLineParser, self).__init__(log_format)
-        self.G1_heap_occupancy_pattern = 'Heap: (?P<HEAP_BEFORE_GC>\d+\.\d+[KMG])\(\d+\.\d+[KMG]\)->(?P<HEAP_AFTER_GC>\d+\.\d+[KMG])\((?P<HEAP_MAX>\d+\.\d+[KMG])\)'
-        self.G1_minorgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC pause .* \(young\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
-        self.G1_remark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC remark .*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
-        self.G1_cleanup_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC cleanup (?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\).*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
-        self.G1_mixed_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC pause .* \(mixed\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
-        self.G1_fullgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Full GC \([^\)]+\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
+        if log_format == JDK8_FORMAT:
+            self.G1_heap_occupancy_pattern = 'Heap: (?P<HEAP_BEFORE_GC>\d+\.\d+[KMG])\(\d+\.\d+[KMG]\)->(?P<HEAP_AFTER_GC>\d+\.\d+[KMG])\((?P<HEAP_MAX>\d+\.\d+[KMG])\)'
+            self.G1_minorgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC pause .* \(young\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
+            self.G1_remark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC remark .*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
+            self.G1_cleanup_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC cleanup (?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\).*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
+            self.G1_mixed_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC pause .* \(mixed\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
+            self.G1_fullgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Full GC \([^\)]+\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
+        else:
+            self.G1_heap_occupancy_pattern = '(?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\)'
+            self.G1_pause_young_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) Pause Young .*' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.G1_remark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) Pause Remark ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.G1_times_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) User=(?P<USER>\d+\.\d+)s Sys=(?P<SYS>\d+\.\d+)s Real=(?P<REAL>\d+\.\d+)s')
 
     def parse_line(self, full_line):
+        if self.log_format == JDK8_FORMAT:
+            self.jdk8_parse_line(full_line)
+        else:
+            self.jdk9_parse_line(full_line)
+
+    def jdk8_parse_line(self, full_line):
         match_line = self.G1_minorgc_re.match(full_line)
         if match_line:  # G1 minor gc
             timestamp = match_line.group('TIMESTAMP')
@@ -335,6 +348,52 @@ class G1GCLineParser(GCLineParser):
                 self.add_data('fullgc', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), round(pause_sec, 3)))
                 self.add_cpu_times(match_line, match_timestamp)
                 self.event_count += 1
+                return
+
+    def jdk9_parse_line(self, full_line):
+        match_line = self.G1_pause_young_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                current_pause_ms = round(float(match_line.group('PAUSE')))
+                before_gc = match_line.group('HEAP_BEFORE_GC')
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
+                    before_gc)))
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
+                                                                    GCLineParser.heap_occupancy_to_G(
+                                                                         match_line.group('HEAP_AFTER_GC'))))
+                self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
+                                                               GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
+                if full_line.find('(Concurrent Start)') != -1:
+                    key = 'initialmark'
+                elif full_line.find('(Normal)') != -1:
+                    key = 'minorgc'
+                elif full_line.find('(Prepare Mixed)') != -1: # == cleanup
+                    key = 'cleanup'
+                elif full_line.find('(Mixed)') != -1:
+                    key = 'mixed'
+                else:
+                    key = 'unknown'
+                self.add_data(key, '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
+                self.event_count += 1
+                return
+        match_line = self.G1_remark_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                current_pause_ms = round(float(match_line.group('PAUSE')))
+                self.add_data('finalremark',
+                              '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
+                self.event_count += 1
+                return
+        match_line = self.G1_times_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                self.add_cpu_times(match_line, match_timestamp)
                 return
 
     def write(self, data_file):
