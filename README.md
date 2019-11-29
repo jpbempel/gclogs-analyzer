@@ -5,7 +5,7 @@ Python script to plot:
  * Pause times
  * CPU times
  
-supports Parallel GC, CMS GC, G1 GC
+supports Parallel GC, CMS GC, G1 GC, Shenandoah
 
 # example:
 
