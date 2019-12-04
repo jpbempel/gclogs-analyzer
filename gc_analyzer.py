@@ -547,7 +547,7 @@ class ShenandoahGCLineParser(GCLineParser):
             if series != '':
                 series = series + ', '
             series = series + SERIE_MS_FORMAT.format('Final Mark', 'final_mark')
-        initupdate_str = ''.join(parser.data.get('initupdate', []))
+        initupdate_str = ''.join(self.data.get('initupdate', []))
         if initupdate_str != '':
             if series != '':
                 series = series + ', '
