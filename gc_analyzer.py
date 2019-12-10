@@ -442,7 +442,7 @@ class ShenandoahGCLineParser(GCLineParser):
     def __init__(self, log_format):
         super(ShenandoahGCLineParser, self).__init__(log_format)
         self.shenandoah_pause_pattern = ', (?P<PAUSE>\d+\.\d+) ms\]'
-        self.shenandoah_heap_occupancy_pattern = '(?P<HEAP_BEFORE_GC>\d+M)->(?P<HEAP_AFTER_GC>\d+M)\((?P<HEAP_MAX>\d+M)\)'
+        self.shenandoah_heap_occupancy_pattern = '(?P<HEAP_BEFORE_GC>\d+[MG])->(?P<HEAP_AFTER_GC>\d+[MG])\((?P<HEAP_MAX>\d+[MG])\)'
         self.shenandoah_init_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
         self.shenandoah_final_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
         self.shenandoah_init_update_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
