@@ -39,8 +39,10 @@ def parse(gclog_file, data_filename):
             print("Detected G1 GC with line: " + line[:idx+len('G1 Evacuation Pause')])
             return G1_GC
         idx = line.find('[Pause ')
+        if idx == -1:
+            idx = line.find('Using Shenandoah')
         if idx != -1:
-            print("Detected Shenandoah GC with line: " + line[:idx+len('[Pause ')])
+            print("Detected Shenandoah GC with line: " + line[:idx+len('Using Shenandoah')])
             return SHENANDOAH_GC
         return None
 
@@ -441,18 +443,33 @@ class G1GCLineParser(GCLineParser):
 class ShenandoahGCLineParser(GCLineParser):
     def __init__(self, log_format):
         super(ShenandoahGCLineParser, self).__init__(log_format)
-        self.shenandoah_pause_pattern = ', (?P<PAUSE>\d+\.\d+) ms\]'
         self.shenandoah_heap_occupancy_pattern = '(?P<HEAP_BEFORE_GC>\d+[MG])->(?P<HEAP_AFTER_GC>\d+[MG])\((?P<HEAP_MAX>\d+[MG])\)'
-        self.shenandoah_init_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_final_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_init_update_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_final_update_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_final_evac_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Evac.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_degenerated_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Degenerated GC.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_full_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Full.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
-        self.shenandoah_heap_occupancy_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Concurrent cleanup.*' + self.shenandoah_heap_occupancy_pattern + '.*', re.DOTALL)
+        if log_format == JDK8_FORMAT:
+            self.shenandoah_pause_pattern = ', (?P<PAUSE>\d+\.\d+) ms\]'
+            self.shenandoah_init_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_mark_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_init_update_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Init Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_update_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_evac_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Final Evac.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_degenerated_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Degenerated GC.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_full_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Pause Full.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_heap_occupancy_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Concurrent cleanup.*' + self.shenandoah_heap_occupancy_pattern + '.*', re.DOTALL)
+        else:
+            self.shenandoah_pause_pattern = '(?P<PAUSE>\d+\.\d+)ms'
+            self.shenandoah_init_mark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Init Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_mark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Final Mark.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_init_update_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Init Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_update_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Final Update.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_final_evac_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Final Evac.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_degenerated_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Pause Degenerated GC.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_full_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) .*\[Pause Full.*' + self.shenandoah_pause_pattern + '.*', re.DOTALL)
+            self.shenandoah_heap_occupancy_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}.* GC\(\d+\) Concurrent cleanup ' + self.shenandoah_heap_occupancy_pattern + '.*', re.DOTALL)
+
 
     def parse_line(self, full_line):
+        self.jdk8_parse_line(full_line)
+
+    def jdk8_parse_line(self, full_line):
         match_line = self.shenandoah_init_mark_re.match(full_line)
         if match_line:  # Shenandoah Init Mark
             timestamp = match_line.group('TIMESTAMP')
@@ -525,6 +542,7 @@ class ShenandoahGCLineParser(GCLineParser):
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, 10), GCLineParser.heap_occupancy_to_G(match_line.group('HEAP_AFTER_GC'))))
                 self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
                 return
+
 
     def write(self, data_file):
         super(ShenandoahGCLineParser, self).write(data_file)
