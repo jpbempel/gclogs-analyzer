@@ -14,14 +14,18 @@ def open_file(inputfile, mode):
         return open(inputfile, mode)
 
 def process(gclog_file, postprocess_file):
-    elapsed_time_re = re.compile('(?P<ELAPSED>^\d+\.\d{3}): ');
+    elapsed_time_re = re.compile('(^\[?(?P<ELAPSED>\d+\.\d{3}))')
     now = time.time()
     for line in gclog_file:
         match_line = elapsed_time_re.match(line)
         if match_line:
             elapsed = float(match_line.group('ELAPSED'))
             date_stamp = datetime.datetime.fromtimestamp(now+elapsed).strftime("%Y-%m-%dT%H:%M:%S.%f")
-            date_stamp = date_stamp[:-3] + "+0100: "
+            date_stamp = date_stamp[:-3] + "+0100"
+            if line.startswith('['):
+                date_stamp = '[' + date_stamp + ']'
+            else:
+                date_stamp = date_stamp + ': '
             postprocess_file.write(date_stamp + line)
         else:
             postprocess_file.write(line)
