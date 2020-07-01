@@ -26,6 +26,14 @@ JDK9_FORMAT = 1
 def parse(gclog_file, data_filename):
 
     def detect_gc_type(line):
+        if sys.argv[1] == "--gc=Parallel":
+            return PARALLEL_GC
+        if sys.argv[1] == "--gc=CMS":
+            return CMS_GC
+        if sys.argv[1] == "--gc=G1":
+            return G1_GC
+        if sys.argv[1] == "--gc=Shenandoah":
+            return SHENANDOAH_GC
         idx = line.find('[PSYoungGen')
         if  idx != -1:
             print("Detected Parallel GC with line: " + line[:idx+len('[PSYoungGen')])
@@ -93,6 +101,10 @@ def parse(gclog_file, data_filename):
                 full_line += line
         else:  # partial line => concat with previous lines
             full_line += line
+
+    if parser is None:
+        print("ERROR: Cannot recognize file format!")
+        return
 
     data_file = open(data_filename, 'w')
     try:
@@ -198,10 +210,21 @@ class ParallelGCParser(GCLineParser):
 
     def __init__(self, log_format):
         super(ParallelGCParser, self).__init__(log_format)
-        self.parallel_minorgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC [^\[]+\[[^\]]+\] (?P<HEAP_BEFORE_GC>\d+)K->(?P<HEAP_AFTER_GC>\d+)K\((?P<HEAP_MAX>\d+)K\)' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
-        self.parallel_fullgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Full GC [^\[]+\[[^\]]+\][^\[]+\[[^\]]+\] (?P<HEAP_BEFORE_GC>\d+)K->(?P<HEAP_AFTER_GC>\d+)K\((?P<HEAP_MAX>\d+)K\),.*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
+        if log_format == JDK8_FORMAT:
+            self.parallel_minorgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC [^\[]+\[[^\]]+\] (?P<HEAP_BEFORE_GC>\d+)K->(?P<HEAP_AFTER_GC>\d+)K\((?P<HEAP_MAX>\d+)K\)' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
+            self.parallel_fullgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Full GC [^\[]+\[[^\]]+\][^\[]+\[[^\]]+\] (?P<HEAP_BEFORE_GC>\d+)K->(?P<HEAP_AFTER_GC>\d+)K\((?P<HEAP_MAX>\d+)K\),.*' + self.pause_pattern + '.*' + self.times_pattern, re.DOTALL)
+        else:
+            self.parallel_heap_occupancy_pattern = ' (?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\)'
+            self.parallel_minorgc_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Young .*' + self.parallel_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.parallel_fullgc_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Full .*' + self.parallel_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
 
     def parse_line(self, full_line):
+        if self.log_format == JDK8_FORMAT:
+            self.jdk8_parse_line(full_line)
+        else:
+            self.jdk9_parse_line(full_line)
+
+    def jdk8_parse_line(self, full_line):
         match_line = self.parallel_minorgc_re.match(full_line)
         if match_line:  # minor GC
             timestamp = match_line.group('TIMESTAMP')
@@ -230,6 +253,44 @@ class ParallelGCParser(GCLineParser):
                 self.event_count += 1
                 return
 
+    def jdk9_parse_line(self, full_line):
+        match_line = self.parallel_minorgc_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                current_pause_ms = round(float(match_line.group('PAUSE')))
+                before_gc = match_line.group('HEAP_BEFORE_GC')
+                after_gc = match_line.group('HEAP_AFTER_GC')
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
+                                                                    GCLineParser.heap_occupancy_to_G(before_gc)))
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
+                                                                    GCLineParser.heap_occupancy_to_G(after_gc)))
+                self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
+                                                               GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
+                self.add_data('minorgc', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
+                self.event_count += 1
+                return
+        match_line = self.parallel_fullgc_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                current_pause_ms = round(float(match_line.group('PAUSE')))
+                before_gc = match_line.group('HEAP_BEFORE_GC')
+                after_gc = match_line.group('HEAP_AFTER_GC')
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
+                                                                    GCLineParser.heap_occupancy_to_G(before_gc)))
+                self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
+                                                                    GCLineParser.heap_occupancy_to_G(after_gc)))
+                self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
+                                                               GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
+                self.add_data('fullgc', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), round(current_pause_ms / 1000, 3)))
+                self.event_count += 1
+                return
+
+
+
     def build_series(self):
         series = ''
         minorgc_str = ''.join(self.data.get('minorgc', []))
@@ -256,10 +317,10 @@ class G1GCLineParser(GCLineParser):
             self.G1_mixed_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[GC pause .* \(mixed\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
             self.G1_fullgc_re = re.compile('(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}: .*\[Full GC \([^\)]+\).*' + self.pause_pattern + '.*' + self.G1_heap_occupancy_pattern + '.*' + self.times_pattern, re.DOTALL)
         else:
-            self.G1_heap_occupancy_pattern = '(?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\)'
-            self.G1_pause_young_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) Pause Young .*' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
-            self.G1_remark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) Pause Remark ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
-            self.G1_times_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\] GC\(\d+\) User=(?P<USER>\d+\.\d+)s Sys=(?P<SYS>\d+\.\d+)s Real=(?P<REAL>\d+\.\d+)s')
+            self.G1_heap_occupancy_pattern = ' (?P<HEAP_BEFORE_GC>\d+[KMG])->(?P<HEAP_AFTER_GC>\d+[KMG])\((?P<HEAP_MAX>\d+[KMG])\)'
+            self.G1_pause_young_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Young .*' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.G1_remark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Remark ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.G1_times_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) User=(?P<USER>\d+\.\d+)s Sys=(?P<SYS>\d+\.\d+)s Real=(?P<REAL>\d+\.\d+)s')
 
     def parse_line(self, full_line):
         if self.log_format == JDK8_FORMAT:
@@ -657,9 +718,11 @@ class CMSGCLineParser(GCLineParser):
             series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
         return series
 
-
-gclog_filename = sys.argv[1]
-data_filename = sys.argv[2]
+idx = 1
+if (sys.argv[1].startswith("--gc=")):
+    idx = 2
+gclog_filename = sys.argv[idx]
+data_filename = sys.argv[idx + 1]
 gclog_file = open_file(gclog_filename, "r")
 try:
     parse(gclog_file, data_filename)
