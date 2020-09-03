@@ -3,6 +3,7 @@ import bz2
 import gzip
 import re
 import math
+import argparse
 
 
 def open_file(inputfile, mode):
@@ -23,97 +24,13 @@ SHENANDOAH_GC = 3
 JDK8_FORMAT = 0
 JDK9_FORMAT = 1
 
-def parse(gclog_file, data_filename):
+# MODE
+HTML_MODE = 0
+STATS_MODE = 1
 
-    def detect_gc_type(line):
-        if sys.argv[1] == "--gc=Parallel":
-            return PARALLEL_GC
-        if sys.argv[1] == "--gc=CMS":
-            return CMS_GC
-        if sys.argv[1] == "--gc=G1":
-            return G1_GC
-        if sys.argv[1] == "--gc=Shenandoah":
-            return SHENANDOAH_GC
-        idx = line.find('[PSYoungGen')
-        if  idx != -1:
-            print("Detected Parallel GC with line: " + line[:idx+len('[PSYoungGen')])
-            return PARALLEL_GC
-        idx = line.find('[ParNew')
-        if idx != -1:
-            print("Detected CMS GC with line: " + line[:idx+len('[ParNew')])
-            return CMS_GC
-        idx = line.find('G1 Evacuation Pause')
-        if idx != -1:
-            print("Detected G1 GC with line: " + line[:idx+len('G1 Evacuation Pause')])
-            return G1_GC
-        idx = line.find('[Pause ')
-        if idx == -1:
-            idx = line.find('Using Shenandoah')
-        if idx != -1:
-            print("Detected Shenandoah GC with line: " + line[:idx+len('Using Shenandoah')])
-            return SHENANDOAH_GC
-        return None
-
-    def detect_log_format(line):
-        jdk9_datetime_re = re.compile('^\[\d{4}-\d{2}-\d{2}T')
-        if jdk9_datetime_re.match(line):
-            print("Format: JDK9+")
-            return JDK9_FORMAT
-        jdk8_datetime_re = re.compile('^\d{4}-\d{2}-\d{2}T')
-        if jdk8_datetime_re.match(line):
-            print("Format: JDK8")
-            return JDK8_FORMAT
-        return None
-
-    def create_parser(gc_type, log_format):
-        if gc_type == PARALLEL_GC:
-            return ParallelGCParser(log_format)
-        if gc_type == CMS_GC:
-            return CMSGCLineParser(log_format)
-        if gc_type == G1_GC:
-            return G1GCLineParser(log_format)
-        if gc_type == SHENANDOAH_GC:
-            return ShenandoahGCLineParser(log_format)
-        return None
-
-    timestamp_line_start_re = re.compile('(\d{4}|\[\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}')
-    full_line = ''
-    gc_type = None
-    log_format = None
-    parser = None
-    for line in gclog_file:
-        if timestamp_line_start_re.match(line):
-            if line.find('[SoftReference,') == -1:
-                if full_line != '':  # process the full previous line
-                    if gc_type is None:
-                        gc_type = detect_gc_type(full_line)
-                    if log_format is None:
-                        log_format = detect_log_format(full_line)
-                    if parser is None:
-                        parser = create_parser(gc_type, log_format)
-                    if parser is not None:
-                        parser.parse_line(full_line)
-                        if parser.event_count > 10000:
-                            print("[WARNING] more than 10K points")
-                            parser.event_count = 0
-                full_line = line  # reset to a new line
-            else:  # PrintReferenceGC => partial line => concat with previous lines
-                full_line += line
-        else:  # partial line => concat with previous lines
-            full_line += line
-
-    if parser is None:
-        print("ERROR: Cannot recognize file format!")
-        return
-
-    data_file = open(data_filename, 'w')
-    try:
-        parser.write(data_file)
-        series = parser.build_series()
-        data_file.write('var series = [{}]\n'.format(series))
-    finally:
-        data_file.close()
-
+mode = HTML_MODE
+total_allocated = 0
+previous_usage = 0
 
 SERIE_MS_FORMAT = '''
         {{
@@ -135,8 +52,8 @@ SERIE_S_FORMAT = '''
             yAxis: 1
         }}'''
 
-class GCLineParser:
 
+class GCLineParser(object):
     def __init__(self, log_format):
         self.log_format = log_format
         self.pause_pattern = ', (?P<PAUSE>\d+\.\d+) secs\]'
@@ -192,22 +109,11 @@ class GCLineParser:
             self.data[key] = value_list
         value_list.append(value)
 
-    def format_data_serie(self, var_format, data_name):
-        return var_format.format(''.join(self.data.get(data_name, [])))
-
-    def write(self, data_file):
-        data_file.write(self.format_data_serie('var data_serie_heap = [{}]\n', 'heap_occupancy'))
-        data_file.write(self.format_data_serie('var data_serie_heapmax = [{}]\n', 'max_heap'))
-        data_file.write(self.format_data_serie('var data_serie_minorgc = [{}]\n', 'minorgc'))
-        data_file.write(self.format_data_serie('var data_serie_fullgc = [{}]\n', 'fullgc'))
-        # Times
-        data_file.write(self.format_data_serie('var data_serie_user = [{}]\n', 'user'))
-        data_file.write(self.format_data_serie('var data_serie_sys = [{}]\n', 'sys'))
-        data_file.write(self.format_data_serie('var data_serie_real = [{}]\n', 'real'))
+    def create_reporter(self):
+        return None
 
 
 class ParallelGCParser(GCLineParser):
-
     def __init__(self, log_format):
         super(ParallelGCParser, self).__init__(log_format)
         if log_format == JDK8_FORMAT:
@@ -254,6 +160,8 @@ class ParallelGCParser(GCLineParser):
                 return
 
     def jdk9_parse_line(self, full_line):
+        global total_allocated
+        global previous_usage
         match_line = self.parallel_minorgc_re.match(full_line)
         if match_line:
             timestamp = match_line.group('TIMESTAMP')
@@ -262,6 +170,8 @@ class ParallelGCParser(GCLineParser):
                 current_pause_ms = round(float(match_line.group('PAUSE')))
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
+                total_allocated += int(before_gc) - previous_usage
+                previous_usage = int(after_gc)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
                                                                     GCLineParser.heap_occupancy_to_G(before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -289,24 +199,11 @@ class ParallelGCParser(GCLineParser):
                 self.event_count += 1
                 return
 
-
-
-    def build_series(self):
-        series = ''
-        minorgc_str = ''.join(self.data.get('minorgc', []))
-        if minorgc_str != '':
-            series = series + SERIE_MS_FORMAT.format('minor GC', 'minorgc')
-        fullgc_str = ''.join(self.data.get('fullgc', []))
-        if fullgc_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
-        return series
-
+    def create_reporter(self):
+        return ParallelJSReporter(self.data)
 
 
 class G1GCLineParser(GCLineParser):
-
     def __init__(self, log_format):
         super(G1GCLineParser, self).__init__(log_format)
         if log_format == JDK8_FORMAT:
@@ -335,11 +232,12 @@ class G1GCLineParser(GCLineParser):
             match_timestamp = self.timestamp_re.match(timestamp)
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')) * 1000)
+                before_gc = match_line.group('HEAP_BEFORE_GC')
+                after_gc = match_line.group('HEAP_AFTER_GC')
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
-                    match_line.group('HEAP_BEFORE_GC'))))
+                    before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
-                                                                    GCLineParser.heap_occupancy_to_G(
-                                                                         match_line.group('HEAP_AFTER_GC'))))
+                                                                    GCLineParser.heap_occupancy_to_G(after_gc)))
                 self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
                                                                GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
                 if full_line.find('(initial-mark)') == -1:
@@ -414,6 +312,8 @@ class G1GCLineParser(GCLineParser):
                 return
 
     def jdk9_parse_line(self, full_line):
+        global total_allocated
+        global previous_usage
         match_line = self.G1_pause_young_re.match(full_line)
         if match_line:
             timestamp = match_line.group('TIMESTAMP')
@@ -421,11 +321,13 @@ class G1GCLineParser(GCLineParser):
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')))
                 before_gc = match_line.group('HEAP_BEFORE_GC')
+                after_gc = match_line.group('HEAP_AFTER_GC')
+                total_allocated += int(before_gc[:-1]) - previous_usage
+                previous_usage = int(after_gc[:-1])
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
-                                                                    GCLineParser.heap_occupancy_to_G(
-                                                                         match_line.group('HEAP_AFTER_GC'))))
+                                                                    GCLineParser.heap_occupancy_to_G(after_gc)))
                 self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp),
                                                                GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
                 if full_line.find('(Concurrent Start)') != -1:
@@ -459,46 +361,8 @@ class G1GCLineParser(GCLineParser):
                 self.add_cpu_times(match_line, match_timestamp)
                 return
 
-    def write(self, data_file):
-        super(G1GCLineParser, self).write(data_file)
-        # CMS/G1
-        data_file.write(self.format_data_serie('var data_serie_initialmark = [{}]\n', 'initialmark'))
-        data_file.write(self.format_data_serie('var data_serie_finalremark = [{}]\n', 'finalremark'))
-        # G1
-        data_file.write(self.format_data_serie('var data_serie_cleanup = [{}]\n', 'cleanup'))
-        data_file.write(self.format_data_serie('var data_serie_mixed = [{}]\n', 'mixed'))
-
-    def build_series(self):
-        series = ''
-        minorgc_str = ''.join(self.data.get('minorgc', []))
-        if minorgc_str != '':
-            series = series + SERIE_MS_FORMAT.format('minor GC', 'minorgc')
-        mixed_str = ''.join(self.data.get('mixed', []))
-        if mixed_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('mixed', 'mixed')
-        initialmark_str = ''.join(self.data.get('initialmark', []))
-        if initialmark_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('initial mark', 'initialmark')
-        finalremark_str = ''.join(self.data.get('finalremark', []))
-        if finalremark_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('final remark', 'finalremark')
-        cleanup_str = ''.join(self.data.get('cleanup', []))
-        if cleanup_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('cleanup', 'cleanup')
-        fullgc_str = ''.join(self.data.get('fullgc', []))
-        if fullgc_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
-        return series
+    def create_reporter(self):
+        return G1JSReporter(self.data)
 
 
 class ShenandoahGCLineParser(GCLineParser):
@@ -604,49 +468,9 @@ class ShenandoahGCLineParser(GCLineParser):
                 self.add_data('max_heap', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_max_to_G(match_line.group('HEAP_MAX'))))
                 return
 
+    def create_reporter(self):
+        return ShenandoahJSReporter(self.data)
 
-    def write(self, data_file):
-        super(ShenandoahGCLineParser, self).write(data_file)
-        data_file.write(self.format_data_serie('var data_serie_init_mark = [{}]\n', 'initmark'))
-        data_file.write(self.format_data_serie('var data_serie_final_mark = [{}]\n', 'finalmark'))
-        data_file.write(self.format_data_serie('var data_serie_init_update = [{}]\n', 'initupdate'))
-        data_file.write(self.format_data_serie('var data_serie_final_update = [{}]\n', 'finalupdate'))
-        data_file.write(self.format_data_serie('var data_serie_final_evac = [{}]\n', 'finalevac'))
-        data_file.write(self.format_data_serie('var data_serie_degenerated = [{}]\n', 'degenerated'))
-
-    def build_series(self):
-        series = ''
-        initmark_str = ''.join(self.data.get('initmark', []))
-        if initmark_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('Init Mark', 'init_mark')
-        finalmark_str = ''.join(self.data.get('finalmark', []))
-        if finalmark_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('Final Mark', 'final_mark')
-        initupdate_str = ''.join(self.data.get('initupdate', []))
-        if initupdate_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('Init Update', 'init_update')
-        finalupdate_str = ''.join(self.data.get('finalupdate', []))
-        if finalupdate_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('Final Update', 'final_update')
-        finalevac_str = ''.join(self.data.get('finalevac', []))
-        if finalevac_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_MS_FORMAT.format('Final Evac', 'final_evac')
-        degenerated_str = ''.join(self.data.get('degenerated', []))
-        if degenerated_str != '':
-            if series != '':
-                series = series + ', '
-            series = series + SERIE_S_FORMAT.format('Degenerated GC', 'degenerated')
-        return series
 
 class CMSGCLineParser(GCLineParser):
 
@@ -690,8 +514,148 @@ class CMSGCLineParser(GCLineParser):
                 self.event_count += 1
                 return
 
+    def create_reporter(self):
+        return CMSJSReporter(self.data)
+
+
+class JSReporter(object):
+    def __init__(self, data):
+        self.data = data
+
+    def format_data_serie(self, var_format, data_name):
+        return var_format.format(''.join(self.data.get(data_name, [])))
+
     def write(self, data_file):
-        super(CMSGCLineParser, self).write(data_file)
+        data_file.write(self.format_data_serie('var data_serie_heap = [{}]\n', 'heap_occupancy'))
+        data_file.write(self.format_data_serie('var data_serie_heapmax = [{}]\n', 'max_heap'))
+        data_file.write(self.format_data_serie('var data_serie_minorgc = [{}]\n', 'minorgc'))
+        data_file.write(self.format_data_serie('var data_serie_fullgc = [{}]\n', 'fullgc'))
+        # Times
+        data_file.write(self.format_data_serie('var data_serie_user = [{}]\n', 'user'))
+        data_file.write(self.format_data_serie('var data_serie_sys = [{}]\n', 'sys'))
+        data_file.write(self.format_data_serie('var data_serie_real = [{}]\n', 'real'))
+
+    def build_series(self):
+        pass
+
+
+class ParallelJSReporter(JSReporter):
+    def __init__(self, data):
+        super(ParallelJSReporter, self).__init__(data)
+
+    def build_series(self):
+        series = ''
+        minorgc_str = ''.join(self.data.get('minorgc', []))
+        if minorgc_str != '':
+            series = series + SERIE_MS_FORMAT.format('minor GC', 'minorgc')
+        fullgc_str = ''.join(self.data.get('fullgc', []))
+        if fullgc_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
+        return series
+
+
+class G1JSReporter(JSReporter):
+    def __init__(self, data):
+        super(G1JSReporter, self).__init__(data)
+
+    def write(self, data_file):
+        super(G1JSReporter, self).write(data_file)
+        # CMS/G1
+        data_file.write(self.format_data_serie('var data_serie_initialmark = [{}]\n', 'initialmark'))
+        data_file.write(self.format_data_serie('var data_serie_finalremark = [{}]\n', 'finalremark'))
+        # G1
+        data_file.write(self.format_data_serie('var data_serie_cleanup = [{}]\n', 'cleanup'))
+        data_file.write(self.format_data_serie('var data_serie_mixed = [{}]\n', 'mixed'))
+
+    def build_series(self):
+        series = ''
+        minorgc_str = ''.join(self.data.get('minorgc', []))
+        if minorgc_str != '':
+            series = series + SERIE_MS_FORMAT.format('minor GC', 'minorgc')
+        mixed_str = ''.join(self.data.get('mixed', []))
+        if mixed_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('mixed', 'mixed')
+        initialmark_str = ''.join(self.data.get('initialmark', []))
+        if initialmark_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('initial mark', 'initialmark')
+        finalremark_str = ''.join(self.data.get('finalremark', []))
+        if finalremark_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('final remark', 'finalremark')
+        cleanup_str = ''.join(self.data.get('cleanup', []))
+        if cleanup_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('cleanup', 'cleanup')
+        fullgc_str = ''.join(self.data.get('fullgc', []))
+        if fullgc_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
+        return series
+
+
+class ShenandoahJSReporter(JSReporter):
+    def __init__(self, data):
+        super(ShenandoahJSReporter, self).__init__(data)
+
+    def write(self, data_file):
+        super(ShenandoahJSReporter, self).write(data_file)
+        data_file.write(self.format_data_serie('var data_serie_init_mark = [{}]\n', 'initmark'))
+        data_file.write(self.format_data_serie('var data_serie_final_mark = [{}]\n', 'finalmark'))
+        data_file.write(self.format_data_serie('var data_serie_init_update = [{}]\n', 'initupdate'))
+        data_file.write(self.format_data_serie('var data_serie_final_update = [{}]\n', 'finalupdate'))
+        data_file.write(self.format_data_serie('var data_serie_final_evac = [{}]\n', 'finalevac'))
+        data_file.write(self.format_data_serie('var data_serie_degenerated = [{}]\n', 'degenerated'))
+
+    def build_series(self):
+        series = ''
+        initmark_str = ''.join(self.data.get('initmark', []))
+        if initmark_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('Init Mark', 'init_mark')
+        finalmark_str = ''.join(self.data.get('finalmark', []))
+        if finalmark_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('Final Mark', 'final_mark')
+        initupdate_str = ''.join(self.data.get('initupdate', []))
+        if initupdate_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('Init Update', 'init_update')
+        finalupdate_str = ''.join(self.data.get('finalupdate', []))
+        if finalupdate_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('Final Update', 'final_update')
+        finalevac_str = ''.join(self.data.get('finalevac', []))
+        if finalevac_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_MS_FORMAT.format('Final Evac', 'final_evac')
+        degenerated_str = ''.join(self.data.get('degenerated', []))
+        if degenerated_str != '':
+            if series != '':
+                series = series + ', '
+            series = series + SERIE_S_FORMAT.format('Degenerated GC', 'degenerated')
+        return series
+
+
+class CMSJSReporter(JSReporter):
+    def __init__(self, data):
+        super(CMSJSReporter, self).__init__(data)
+
+    def write(self, data_file):
+        super(CMSJSReporter, self).write(data_file)
         # CMS/G1
         data_file.write(self.format_data_serie('var data_serie_initialmark = [{}]\n', 'initialmark'))
         data_file.write(self.format_data_serie('var data_serie_finalremark = [{}]\n', 'finalremark'))
@@ -718,13 +682,122 @@ class CMSGCLineParser(GCLineParser):
             series = series + SERIE_S_FORMAT.format('Full GC', 'fullgc')
         return series
 
-idx = 1
-if (sys.argv[1].startswith("--gc=")):
-    idx = 2
-gclog_filename = sys.argv[idx]
-data_filename = sys.argv[idx + 1]
+
+def parse(args, gclog_file):
+
+    def detect_gc_type(line):
+        if args.gc == "Parallel":
+            return PARALLEL_GC
+        if args.gc == "CMS":
+            return CMS_GC
+        if args.gc == "G1":
+            return G1_GC
+        if args.gc == "Shenandoah":
+            return SHENANDOAH_GC
+        idx = line.find('[PSYoungGen')
+        if  idx != -1:
+            print("Detected Parallel GC with line: " + line[:idx+len('[PSYoungGen')])
+            return PARALLEL_GC
+        idx = line.find('[ParNew')
+        if idx != -1:
+            print("Detected CMS GC with line: " + line[:idx+len('[ParNew')])
+            return CMS_GC
+        idx = line.find('G1 Evacuation Pause')
+        if idx != -1:
+            print("Detected G1 GC with line: " + line[:idx+len('G1 Evacuation Pause')])
+            return G1_GC
+        idx = line.find('[Pause ')
+        if idx == -1:
+            idx = line.find('Using Shenandoah')
+        if idx != -1:
+            print("Detected Shenandoah GC with line: " + line[:idx+len('Using Shenandoah')])
+            return SHENANDOAH_GC
+        return None
+
+    def detect_log_format(line):
+        jdk9_datetime_re = re.compile('^\[\d{4}-\d{2}-\d{2}T')
+        if jdk9_datetime_re.match(line):
+            print("Format: JDK9+")
+            return JDK9_FORMAT
+        jdk8_datetime_re = re.compile('^\d{4}-\d{2}-\d{2}T')
+        if jdk8_datetime_re.match(line):
+            print("Format: JDK8")
+            return JDK8_FORMAT
+        return None
+
+    def create_parser(gc_type, log_format):
+        if gc_type == PARALLEL_GC:
+            return ParallelGCParser(log_format)
+        if gc_type == CMS_GC:
+            return CMSGCLineParser(log_format)
+        if gc_type == G1_GC:
+            return G1GCLineParser(log_format)
+        if gc_type == SHENANDOAH_GC:
+            return ShenandoahGCLineParser(log_format)
+        return None
+
+    timestamp_line_start_re = re.compile('(\d{4}|\[\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}')
+    full_line = ''
+    gc_type = None
+    log_format = None
+    parser = None
+    for line in gclog_file:
+        if timestamp_line_start_re.match(line):
+            if line.find('[SoftReference,') == -1:
+                if full_line != '':  # process the full previous line
+                    if gc_type is None:
+                        gc_type = detect_gc_type(full_line)
+                    if log_format is None:
+                        log_format = detect_log_format(full_line)
+                    if parser is None:
+                        parser = create_parser(gc_type, log_format)
+                    if parser is not None:
+                        parser.parse_line(full_line)
+                        if parser.event_count > 10000:
+                            print("[WARNING] more than 10K points")
+                            parser.event_count = 0
+                full_line = line  # reset to a new line
+            else:  # PrintReferenceGC => partial line => concat with previous lines
+                full_line += line
+        else:  # partial line => concat with previous lines
+            full_line += line
+
+    return parser
+
+
+arg_parser = argparse.ArgumentParser(prog='gc_analyzer', description='gclogs analyzer reporting HTML charts for Heap usage, GC pauses & CPU times. Reports also GC stats')
+arg_parser.add_argument('gclog_file', help='gc log file to analyze')
+arg_parser.add_argument('data_file', nargs='?', help='js data file to output used by HTML charts')
+arg_parser.add_argument('-t', '--gc', action='store_true', help='Force to recognize gc logs file as specific GC algorithm. Supported values: Parallel, CMS, G1, Shenandoah')
+arg_parser.add_argument('-s', '--stats', action='store_true', help='Outputs only GC stats in stdout')
+args = arg_parser.parse_args()
+
+if args.stats:
+    mode = STATS_MODE
+if not args.stats and not args.data_file:
+    print('Missing data_file for HTML report mode')
+    arg_parser.print_usage()
+    sys.exit(1)
+
+gclog_filename = args.gclog_file
 gclog_file = open_file(gclog_filename, "r")
 try:
-    parse(gclog_file, data_filename)
+    parser = parse(args, gclog_file)
+    if args.stats:
+        print("Total allocated: ", total_allocated, "MB")
+        sys.exit(0)
+    if parser is None:
+        print("ERROR: Cannot recognize file format!")
+        sys.exit(1)
+
+    reporter = parser.create_reporter()
+    data_file = open(args.data_file, 'w')
+    try:
+        reporter.write(data_file)
+        series = reporter.build_series()
+        data_file.write('var series = [{}]\n'.format(series))
+    finally:
+        data_file.close()
+
 finally:
     gclog_file.close()
