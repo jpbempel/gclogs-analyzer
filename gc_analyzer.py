@@ -234,6 +234,7 @@ class G1GCLineParser(GCLineParser):
             self.G1_pause_young_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Young .* ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
             self.G1_remark_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Remark ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
             self.G1_cleanup_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Cleanup ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
+            self.G1_fullgc_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) Pause Full .* ' + self.G1_heap_occupancy_pattern + ' ' + self.jdk9_pause_pattern)
             self.G1_times_re = re.compile('\[(?P<TIMESTAMP>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3})\+\d{4}\].*GC\(\d+\) User=(?P<USER>\d+\.\d+)s Sys=(?P<SYS>\d+\.\d+)s Real=(?P<REAL>\d+\.\d+)s')
 
     def parse_line(self, full_line):
@@ -358,7 +359,7 @@ class G1GCLineParser(GCLineParser):
                 current_pause_ms = round(float(match_line.group('PAUSE')))
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
-                jdk9_add_total_allocated(before_gc, after_gc)
+                self.jdk9_add_total_allocated(before_gc, after_gc)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -395,6 +396,16 @@ class G1GCLineParser(GCLineParser):
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')))
                 self.add_data('cleanup',
+                              '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
+                self.event_count += 1
+                return
+        match_line = self.G1_fullgc_re.match(full_line)
+        if match_line:
+            timestamp = match_line.group('TIMESTAMP')
+            match_timestamp = self.timestamp_re.match(timestamp)
+            if match_timestamp:
+                current_pause_ms = round(float(match_line.group('PAUSE')))
+                self.add_data('fullgc',
                               '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
                 self.event_count += 1
                 return
