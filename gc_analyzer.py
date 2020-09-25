@@ -57,8 +57,10 @@ class GCLineParser(object):
         self.times_pattern = '\[Times: user=(?P<USER>\d+\.\d+) sys=(?P<SYS>\d+\.\d+), real=(?P<REAL>\d+\.\d+) secs\]'
         self.timestamp_re = re.compile('(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})')
         self.data = {}
+        #stats
         self.previous_usage = 0
         self.total_allocated = 0
+        self.pause_durations = []
         self.event_count = 0
 
     @staticmethod
@@ -120,6 +122,9 @@ class GCLineParser(object):
     def jdk9_add_total_allocated(self, before_gc, after_gc):
         self.total_allocated += int(before_gc[:-1]) - self.previous_usage
         self.previous_usage = int(after_gc[:-1])
+
+    def add_pause_duration(self, current_pause):
+        self.pause_durations.append(current_pause)
 
     def create_reporter(self):
         return None
@@ -270,6 +275,7 @@ class G1GCLineParser(GCLineParser):
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
                 self.jdk8_add_total_allocated(before_gc, after_gc)
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -290,6 +296,7 @@ class G1GCLineParser(GCLineParser):
             match_timestamp = self.timestamp_re.match(timestamp)
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')) * 1000)
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('finalremark', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
                 self.add_cpu_times(match_line, match_timestamp)
                 self.event_count += 1
@@ -303,6 +310,7 @@ class G1GCLineParser(GCLineParser):
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
                 self.jdk8_add_total_allocated(before_gc, after_gc)
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -321,6 +329,7 @@ class G1GCLineParser(GCLineParser):
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
                 current_pause_ms = round(float(match_line.group('PAUSE')) * 1000)
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -340,6 +349,7 @@ class G1GCLineParser(GCLineParser):
                 current_pause_ms = round(pause_sec * 1000)
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
                                                                      GCLineParser.heap_occupancy_to_G(after_gc)))
@@ -360,6 +370,7 @@ class G1GCLineParser(GCLineParser):
                 before_gc = match_line.group('HEAP_BEFORE_GC')
                 after_gc = match_line.group('HEAP_AFTER_GC')
                 self.jdk9_add_total_allocated(before_gc, after_gc)
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), GCLineParser.heap_occupancy_to_G(
                     before_gc)))
                 self.add_data('heap_occupancy', '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp, current_pause_ms),
@@ -385,6 +396,7 @@ class G1GCLineParser(GCLineParser):
             match_timestamp = self.timestamp_re.match(timestamp)
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')))
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('finalremark',
                               '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
                 self.event_count += 1
@@ -395,6 +407,7 @@ class G1GCLineParser(GCLineParser):
             match_timestamp = self.timestamp_re.match(timestamp)
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')))
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('cleanup',
                               '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
                 self.event_count += 1
@@ -405,6 +418,7 @@ class G1GCLineParser(GCLineParser):
             match_timestamp = self.timestamp_re.match(timestamp)
             if match_timestamp:
                 current_pause_ms = round(float(match_line.group('PAUSE')))
+                self.add_pause_duration(current_pause_ms)
                 self.add_data('fullgc',
                               '[{},{}],\n'.format(GCLineParser.format_timestamp(match_timestamp), current_pause_ms))
                 self.event_count += 1
@@ -754,6 +768,10 @@ def parse(args, gclog_file):
         if  idx != -1:
             print("Detected Parallel GC with line: " + line[:idx+len('[PSYoungGen')])
             return PARALLEL_GC
+        idx = line.find('Using Parallel')
+        if  idx != -1:
+            print("Detected Parallel GC with line: " + line[:idx+len('[PSYoungGen')])
+            return PARALLEL_GC
         idx = line.find('[ParNew')
         if idx != -1:
             print("Detected CMS GC with line: " + line[:idx+len('[ParNew')])
@@ -841,6 +859,27 @@ try:
     parser = parse(args, gclog_file)
     if args.stats:
         print("Total allocated: ", parser.total_allocated, "MB")
+
+        def get_percentile(percentile, values):
+            count = len(values)
+            return values[int(count * percentile)]
+
+        pause_avg = sum(parser.pause_durations) / len(parser.pause_durations)
+        print("# pauses:", len(parser.pause_durations))
+        print("pauses avg:", pause_avg)
+        parser.pause_durations.sort()
+        print("pauses percentiles:")
+        print("10%:", get_percentile(0.1, parser.pause_durations))
+        print("20%:", get_percentile(0.2, parser.pause_durations))
+        print("30%:", get_percentile(0.3, parser.pause_durations))
+        print("40%:", get_percentile(0.4, parser.pause_durations))
+        print("50%:", get_percentile(0.5, parser.pause_durations))
+        print("60%:", get_percentile(0.6, parser.pause_durations))
+        print("70%:", get_percentile(0.7, parser.pause_durations))
+        print("80%:", get_percentile(0.8, parser.pause_durations))
+        print("90%:", get_percentile(0.9, parser.pause_durations))
+        print("95%:", get_percentile(0.95, parser.pause_durations))
+        print("99%:", get_percentile(0.99, parser.pause_durations))
         sys.exit(0)
     if parser is None:
         print("ERROR: Cannot recognize file format!")
