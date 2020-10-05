@@ -864,8 +864,11 @@ try:
             count = len(values)
             return values[int(count * percentile)]
 
+        pause_count = len(parser.pause_durations)
+        print("# pauses:", pause_count)
+        if pause_count == 0:
+            sys.exit(0)
         pause_avg = sum(parser.pause_durations) / len(parser.pause_durations)
-        print("# pauses:", len(parser.pause_durations))
         print("pauses avg:", pause_avg)
         parser.pause_durations.sort()
         print("pauses percentiles:")
