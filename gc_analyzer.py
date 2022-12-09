@@ -842,7 +842,7 @@ def parse(args, gclog_file):
 arg_parser = argparse.ArgumentParser(prog='gc_analyzer', description='gclogs analyzer reporting HTML charts for Heap usage, GC pauses & CPU times. Reports also GC stats')
 arg_parser.add_argument('gclog_file', help='gc log file to analyze')
 arg_parser.add_argument('data_file', nargs='?', help='js data file to output used by HTML charts')
-arg_parser.add_argument('-t', '--gc', action='store_true', help='Force to recognize gc logs file as specific GC algorithm. Supported values: Parallel, CMS, G1, Shenandoah')
+arg_parser.add_argument('-t', '--gc', help='Force to recognize gc logs file as specific GC algorithm. Supported values: Parallel, CMS, G1, Shenandoah')
 arg_parser.add_argument('-s', '--stats', action='store_true', help='Outputs only GC stats in stdout')
 args = arg_parser.parse_args()
 
